@@ -10,5 +10,33 @@ library(tidyverse)
 
 
 ``` {r reading}
-zambia <- read_csv()
+#### TRY WITH jsonlite PACKAGE ####
+results <- jsonlite::fromJSON('Data/buffered_lossyear.geojson') 
+
+#function to combine the tables within the list. #Not sure why it works, taken from stack overflow :-)
+multi_join <- function(list_of_loaded_data, join_func, ...){
+  output <- Reduce(function(x, y) {join_func(x, y, ...)}, list_of_loaded_data)
+  return(output)
+}
+
+merged_data <- multi_join(results$features$properties[[1]], rbind) #merged data into matrix
+lossyear <- tibble(year = merged_data[,1] %>% as.integer(), pixels = merged_data[,2])  #tibble to make calculations. Fixing type of data
+bins <- (results$features$properties[[1]][[1]] %>% dim())[1]     #number of bins in the histogram
+id <- seq_along(results$features) %>% rep(bins) %>% sort()   #list of ids to merge
+
+#adding id of point to tibble
+lossyear$id <- id
+
+#calculating areas lost each year
+lossyear <- lossyear %>% mutate(
+  arealoss = pixels * 28 * 28 / 10000   #lost area in that year in km2
+)
+
+#print table
+lossyear
+
+#quick graph 
+g <- ggplot(lossyear, aes(x = year, y = arealoss)) +
+  geom_line(aes(color = factor(id)))
+g
 ```
