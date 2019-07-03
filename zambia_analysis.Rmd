@@ -1,0 +1,14 @@
+---
+title: "Zambia nightlights data analysis"
+output: html_notebook
+---
+
+```{r packages}
+
+library(tidyverse)
+```
+
+
+``` {r reading}
+zambia <- read_csv()
+```
