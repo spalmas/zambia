@@ -3,50 +3,137 @@ title: "Zambia nightlights data analysis"
 output: html_notebook
 ---
 
+We first need to bring the results of the GEE analysis to the Data folder of this project.
+```{r, engine = 'bash', echo = F, eval = FALSE}
+#7z l ~/Downloads/Data-20190719T081856Z-001.zip
+#7z x -aoa	~/Downloads/Data-20190719T081856Z-001.zip Data/
+
+mv ~/Downloads/hansen_buffered.geojson Data/
+mv ~/Downloads/night_buffered.geojson Data/
+
+```
+
+
 ```{r packages, message=FALSE}
+rm(list = ls())
+gc()
 library(tidyverse)
 ```
 
 
 
+### Creating forest loss table
+
+This code creates the table of pixel count per year of forest loss. In other words, it has the number of pixels lost in each year in each cluster.
+
 I used the cluster center coordinates recorded in 2015 (not 2012).
 
-### Creating forest loss table
 ``` {r forest lost}
 #### TRY WITH jsonlite PACKAGE ####
-buffered_lossyear <- jsonlite::fromJSON('Data/buffered_lossyear.geojson') 
-
-#cluster id array
-cluster <- rep(buffered_lossyear$features$properties$cluster, each = 7)
-forestloss <- tibble(cluster)
-
-#Brining list of dataframes to just one table.
-hist_results <- plyr::ldply(buffered_lossyear$features$properties$histogram, rbind)
-colnames(hist_results) <- c('year', 'count')
-
-#is any list null?
-lapply(buffered_lossyear$features$properties$histogram, is.null)
-
-#combing cluster id array and reulst
-forestloss <- forestloss %>% 
-  cbind(hist_results) %>% 
-  mutate(year = (year + 2000) %>% as.integer())
+forestloss <- jsonlite::fromJSON('Data/hansen_buffered.geojson') 
+forestloss <- forestloss$features$properties %>%
+  as_tibble() %>% 
+  mutate(year = as.integer(imageId) + 2012,
+         arealoss_ha = sum / 10000) %>% 
+  select(cluster, year, arealoss_ha)
 
 head(forestloss)
 ```
-
-### Creating nightlights time-series table
-``` {r nightlights}
-#### TRY WITH jsonlite PACKAGE ####
-triplets <- jsonlite::fromJSON('Data/triplets.geojson') 
-
-night <- as_tibble(triplets$features$properties) %>% 
-  mutate(year = substr(imageId, start=1, stop = 4) %>% as.integer())
-night
+``` {r}
+g <- ggplot(data = forestloss, aes(year, arealoss_ha, group=cluster)) +
+  geom_line(alpha=0.1)
+g
 ```
 
+
+### Creating nightlights time-series table
+
+The nighlight dataset is very variable. Probably due to cloud coverage or errors with the products. Here are the plots of nightlight values sum per cluster|year to see whic month is the most reasonable (less variable, more consistent)/
+
+```{r plot all nightlight years, echo = FALSE}
+for (y in seq(1,12,1)){
+  #y <- 1
+  #### TRY WITH jsonlite PACKAGE ####
+  triplets <- jsonlite::fromJSON(paste0('Data/night_buffered', y, '.geojson') )
+  #9 and 10 do not go to zero. They are more balanced
+  
+  night <- triplets$features$properties %>% 
+    as_tibble() %>% 
+    mutate(year = substr(imageId, start=1, stop = 4) %>% as.integer(),
+           urban_degree = sum) %>% 
+    arrange(cluster, year)
+  
+  g <- ggplot(data=night, aes(y = log(urban_degree), x=year, group=factor(cluster))) +
+    geom_line(alpha = 0.1) +
+    ggtitle(paste0('Year = ', y, '. Urban degree per year per cluster'))
+  print(g)
+}
+
+```
+
+
+I chose October. The column of sum is the sum of the radiance values of the buffered area. Could
+be considered as a degree of urbanization of the buffered area. For clarity, I rename this column to be
+*nightlight_sum*.
+
+``` {r nightlights}
+triplets <- jsonlite::fromJSON('Data/night_buffered10.geojson') 
+
+night <- triplets$features$properties %>% 
+  as_tibble() %>% 
+  mutate(year = substr(imageId, start=1, stop = 4) %>% as.integer(),
+         nightlight_sum = sum) %>% 
+  arrange(cluster, year)
+
+#estimating urban growth of the period since last year.
+night$urban_growth <- c(NA, (tail(night$nightlight_sum, -1) - head(night$nightlight_sum, -1)))
+
+#removing data for 2012
+night$urban_growth[night$year==2012] <- NA
+head(night)
+
+```
+
+
+Then we join the two tables and select the columns to be used.
+
 ``` {r join}
-#### TRY WITH jsonlite PACKAGE ####
-clusters <- full_join(forestloss, night, by = c('cluster', 'year'))
+clusters <- full_join(forestloss, night, by = c('cluster', 'year')) %>%
+  select(cluster, year, arealoss_ha, nightlight_sum, urban_growth)
 head(clusters)
+```
+# Exploratory analysis
+
+```{r, echo = FALSE}
+g <- ggplot(data=clusters, aes(x = log(nightlight_sum), y=log(arealoss_ha))) +
+geom_point(alpha = 0.2) +
+ggtitle("urban degree vs. area_loss. Each point represents a cluster|year")
+g
+```
+
+
+```{r, echo = FALSE}
+
+g <- ggplot(data=clusters, aes(x = log(urban_growth), y=log(arealoss_ha))) +
+geom_point(alpha = 0.2) +
+ggtitle("urban growth vs forested area lost. Each point represents a cluster-year")
+g
+```
+
+Here aI try to correlate area loss from previous year to urban growth with any lag. Forest loss ~ to urban growth from x last year.
+``` {r lag}
+clusters_lag <- clusters %>% arrange(cluster, year)
+
+lag <- 5
+
+clusters_lag$urbangrowth_lag <- c(rep(NA, lag), head(clusters_lag$urban_growth, -lag) )  
+clusters_lag$urbangrowth_lag[clusters_lag$year %in% 2012:(2012+(lag-1))] <- NA  #delete values that should have no growth information for that lag
+clusters_lag <- clusters_lag %>% filter(!is.na(lag))
+
+head(clusters_lag)
+
+g <- ggplot(data=clusters_lag, aes(x = log(urbangrowth_lag), y=log(arealoss_ha))) +
+  geom_point(alpha = 0.2) +
+  ggtitle(paste0('urban growth (lag of ',  lag,' years) vs forested area lost. Each point represents a cluster-year'))
+g
 ```
