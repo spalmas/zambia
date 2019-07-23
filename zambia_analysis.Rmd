@@ -95,12 +95,16 @@ head(night)
 ```
 
 
-Then we join the two tables and select the columns to be used.
+Then Ijoin the two tables and select the columns to be used. I also export the table for further analysis.
 
 ``` {r join}
 clusters <- full_join(forestloss, night, by = c('cluster', 'year')) %>%
   select(cluster, year, arealoss_ha, nightlight_sum, urban_growth)
+
+write_csv(clusters, path = 'Data/forestloss_nightlights_cluster.csv')
+
 head(clusters)
+
 ```
 # Exploratory analysis
 
